@@ -13,7 +13,7 @@ const client = new Client({
 });
 
 const leaderboardSchema = new mongoose.Schema({
-	sheetLink: String,
+	sheetLink: { type: String, required: true },
 	updatedAt: { type: Date, default: Date.now }
 });
 
@@ -33,27 +33,34 @@ client.on('messageCreate', async (message) => {
 	if (message.content === '!updateboard') {
 		try {
 			const messages = await message.channel.messages.fetch({ limit: 15 });
-			const targetMessage = messages.find(msg => msg.content.includes('docs.google.com/spreadsheets'));
+			const targetMessage = messages.find(msg => msg.content && msg.content.includes('docs.google.com/spreadsheets'));
 
 			if (!targetMessage) {
-				return message.reply('I could not find any Google Sheets link in the last 15 messages!');
+				await message.reply('Error: Google Sheets link not found.');
+				return;
 			}
 
 			const urlRegex = /(https?:\/\/[^\s]+)/g;
-			const sheetUrl = targetMessage.content.match(urlRegex)[0];
+			const match = targetMessage.content.match(urlRegex);
+			const rawUrl = match ? match[0] : null;
 
-			await Leaderboard.findOneAndUpdate(
-				{},
-				{ sheetLink: sheetUrl, updatedAt: new Date() },
-				{ upsert: true }
-			);
+			if (rawUrl) {
+				const baseUrl = rawUrl.split('/edit')[0];
+				const formattedUrl = `${baseUrl}/gviz/tq?tqx=out:csv`;
 
-			message.reply(`The leaderboard has been updated: ${sheetUrl}`);
+				await Leaderboard.findOneAndUpdate(
+					{},
+					{ $set: { sheetLink: formattedUrl, updatedAt: new Date() } },
+					{ upsert: true, new: true }
+				);
+
+				await message.reply(`**Leaderboard data source has been successfully synchronized.**\n\n**Source URL:** ${formattedUrl}`);
+			}
 		} catch (error) {
-			console.error(error);
-			message.reply('An error occurred while processing the command.');
+			console.error('Update Error:', error);
+			await message.reply('System Error: Database synchronization failed.');
 		}
 	}
 });
 
-client.login(process.env.TOKEN);
+client.login(process.env.TOKEN).catch(err => console.error('Login Error:', err));
